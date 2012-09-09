@@ -1,0 +1,17 @@
+c:\workspace\Pollka\Pollka.Tests\bin\Debug\Pollka.Tests.dll
+c:\workspace\Pollka\Pollka.Tests\bin\Debug\Pollka.Tests.pdb
+c:\workspace\Pollka\Pollka.Tests\bin\Debug\nunit.framework.dll
+c:\workspace\Pollka\Pollka.Tests\bin\Debug\Pollka.dll
+c:\workspace\Pollka\Pollka.Tests\bin\Debug\Pollka.pdb
+c:\workspace\Pollka\Pollka.Tests\bin\Debug\nunit.framework.xml
+c:\workspace\Pollka\Pollka.Tests\obj\Debug\ResolveAssemblyReference.cache
+c:\workspace\Pollka\Pollka.Tests\obj\Debug\Pollka.Tests.dll
+c:\workspace\Pollka\Pollka.Tests\obj\Debug\Pollka.Tests.pdb
+c:\workspace\Pollka\Pollka.Tests\bin\Debug\Shouldly.dll
+c:\workspace\Pollka\Pollka.Tests\bin\Debug\System.Reactive.Interfaces.dll
+c:\workspace\Pollka\Pollka.Tests\bin\Debug\System.Reactive.Linq.dll
+c:\workspace\Pollka\Pollka.Tests\bin\Debug\System.Reactive.Core.dll
+c:\workspace\Pollka\Pollka.Tests\bin\Debug\Shouldly.pdb
+c:\workspace\Pollka\Pollka.Tests\bin\Debug\System.Reactive.Interfaces.xml
+c:\workspace\Pollka\Pollka.Tests\bin\Debug\System.Reactive.Linq.xml
+c:\workspace\Pollka\Pollka.Tests\bin\Debug\System.Reactive.Core.xml

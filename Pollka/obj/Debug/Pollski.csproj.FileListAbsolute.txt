@@ -1,0 +1,13 @@
+c:\workspace\Pollka\Pollka\bin\Debug\Pollka.dll
+c:\workspace\Pollka\Pollka\bin\Debug\Pollka.pdb
+c:\workspace\Pollka\Pollka\bin\Debug\System.Reactive.Core.dll
+c:\workspace\Pollka\Pollka\bin\Debug\System.Reactive.Interfaces.dll
+c:\workspace\Pollka\Pollka\bin\Debug\System.Reactive.Linq.dll
+c:\workspace\Pollka\Pollka\bin\Debug\System.Reactive.PlatformServices.dll
+c:\workspace\Pollka\Pollka\bin\Debug\System.Reactive.Core.xml
+c:\workspace\Pollka\Pollka\bin\Debug\System.Reactive.Interfaces.xml
+c:\workspace\Pollka\Pollka\bin\Debug\System.Reactive.Linq.xml
+c:\workspace\Pollka\Pollka\bin\Debug\System.Reactive.PlatformServices.xml
+c:\workspace\Pollka\Pollka\obj\Debug\ResolveAssemblyReference.cache
+c:\workspace\Pollka\Pollka\obj\Debug\Pollka.dll
+c:\workspace\Pollka\Pollka\obj\Debug\Pollka.pdb

@@ -1,0 +1,8 @@
+[Bb]in/
+*.user
+*.suo
+*.log
+*.chk
+_ReSharper.*
+ReSharper.*
+packages/
