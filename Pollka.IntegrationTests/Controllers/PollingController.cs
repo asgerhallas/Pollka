@@ -9,11 +9,11 @@ namespace Pollka.IntegrationTests.Controllers
         public void WaitForAsync(string client, string channel)
         {
             AsyncManager.OutstandingOperations.Increment();
-            q.ReceiveNext(client, channel, message =>
-                                           {
-                                               AsyncManager.Parameters.Add("Message", message);
-                                               AsyncManager.OutstandingOperations.Decrement();
-                                           });
+            //q.ReceiveNext(client, channel, message =>
+            //                               {
+            //                                   AsyncManager.Parameters.Add("Message", message);
+            //                                   AsyncManager.OutstandingOperations.Decrement();
+            //                               });
         }
 
         public ActionResult WaitForCompleted(object message)

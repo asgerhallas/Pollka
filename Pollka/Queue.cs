@@ -1,116 +1,108 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
+using System.Threading;
+using Microsoft.FSharp.Collections;
+using System.Linq;
 
 namespace Pollka
 {
     public class Queue
     {
+        long messageCounter;
         readonly ISubject<Client> clients;
-        readonly ISubject<MessageWrapper> messages;
+        readonly ReplaySubject<MessageWrapper> incomingMessages;
+        readonly ConcurrentDictionary<string, long?> lastMessageSeenByClient;
 
-        public Queue() : this(TimeSpan.FromSeconds(30)) {}
+        public Queue() : this(TimeSpan.FromSeconds(30))
+        {
+        }
 
         public Queue(TimeSpan messageTimeout)
         {
-            messages = new ReplaySubject<MessageWrapper>(messageTimeout);
+            lastMessageSeenByClient = new ConcurrentDictionary<string, long?>();
+            incomingMessages = new ReplaySubject<MessageWrapper>(messageTimeout);
             clients = new Subject<Client>();
             Listen();
         }
 
         public void Listen()
         {
+            // could we gate clients
             clients.Subscribe(client =>
-                              {
-                                  messages
-                                      .Where(message => message.Channels.Contains(client.Channel)
-                                                        && !message.IsReceivedBy(client.Id))
-                                      .Buffer(TimeSpan.FromSeconds(1))
-                                      .Take(1)
-                                      .Subscribe(x =>
-                                                 {
-                                                     client.Callback(x);
-                                                     foreach (var messageWrapper in x)
-                                                     {
-                                                        messageWrapper.MarkAsReceivedFor(client.Id);
-                                                     }
-                                                 });
-                              });
+            {
+                long? lastSeen;
+                lastMessageSeenByClient.TryGetValue(client.Id, out lastSeen);
+                incomingMessages
+                    .Where(x => lastSeen == null || x.SequentialId > lastSeen)
+                    .Where(message => client.Channels.Contains(message.Channel))
+                    .Timeout(TimeSpan.FromSeconds(30))
+                    .Buffer(TimeSpan.FromMilliseconds(50))
+                    .Where(x => x.Count > 0)
+                    .Take(1)
+                    .Subscribe(messages =>
+                    {
+                        var messageAggregation = messages.Aggregate(
+                            new { Messages = FSharpList<object>.Empty, SequentialId = 0L },
+                            (acc, message) => new
+                            {
+                                Messages = FSharpList<object>.Cons(new
+                                {
+                                    id = message.MessageId,
+                                    channel = message.Channel,
+                                    type = message.Message.GetType().Name,
+                                    message = message.Message
+                                }, acc.Messages),
+                                SequentialId = Math.Max(acc.SequentialId, message.SequentialId)
+                            });
+
+                        client.Callback(messageAggregation.Messages);
+                        lastMessageSeenByClient[client.Id] = messageAggregation.SequentialId;
+                    },
+                    ex => client.Callback(Enumerable.Empty<object>()));
+            });
         }
 
-        public void Send(string channel, object message)
+        public void Send(Guid messageId, string channel, object message)
         {
-            messages.OnNext(new MessageWrapper(new List<string> {channel}, message));
+            incomingMessages.OnNext(new MessageWrapper(Interlocked.Increment(ref messageCounter), messageId, channel, message));
         }
 
-        public void ReceiveNext(string clientId, string channel, Action<IEnumerable<object>> callback)
+        public void ReceiveNext(string clientId, List<string> channels, Action<IEnumerable<object>> callback)
         {
-            clients.OnNext(new Client(clientId, channel, callback));
+            clients.OnNext(new Client(clientId, channels, callback));
         }
-
-        //public void ReceiveNext(string clientId, string channel, Action<IEnumerable<object>> callback)
-        //{
-        //    var subscription = Disposable.Empty;
-        //    subscription = messages
-        //        .Where(message => message.Channels.Contains(channel))
-        //        
-        //        .Subscribe(listOfMessages =>
-        //                   {
-        //                       callback(ListModule.Reverse(listOfMessages));
-        //                       subscription.Dispose();
-        //                   });
-        //}
 
         class Client
         {
-            public Client(string id, string channel, Action<IEnumerable<object>> callback)
+            public Client(string id, List<string> channels, Action<IEnumerable<object>> callback)
             {
                 Id = id;
-                Channel = channel;
+                Channels = channels;
                 Callback = callback;
             }
 
             public string Id { get; private set; }
-            public string Channel { get; private set; }
+            public List<string> Channels { get; private set; }
             public Action<IEnumerable<object>> Callback { get; private set; }
         }
 
         class MessageWrapper
         {
-            readonly object message;
-            readonly List<string> receivers;
-
-            public MessageWrapper(List<string> channels, object message)
+            public MessageWrapper(long sequentialId, Guid messageId, string channel, object message)
             {
-                this.message = message;
-                receivers = new List<string>();
-                Channels = channels;
+                SequentialId = sequentialId;
+                MessageId = messageId;
+                Message = message;
+                Channel = channel;
             }
 
-            public List<string> Channels { get; private set; }
-
-            public bool TryDispatchTo(string clientId, Action<IEnumerable<object>> handler)
-            {
-                lock (receivers)
-                {
-                    if (IsReceivedBy(clientId)) return false;
-                    //handler(message);
-                    MarkAsReceivedFor(clientId);
-                    return true;
-                }
-            }
-
-            public void MarkAsReceivedFor(string clientId)
-            {
-                receivers.Add(clientId);
-            }
-
-            public bool IsReceivedBy(string clientId)
-            {
-                return receivers.Contains(clientId);
-            }
+            public long SequentialId { get; private set; }
+            public Guid MessageId { get; private set; }
+            public string Channel { get; private set; }
+            public object Message { get; private set; }
         }
     }
 }
