@@ -4,7 +4,7 @@ namespace Pollka.IntegrationTests.Controllers
 {
     public class PollingController : AsyncController
     {
-        public static Queue q = new Queue();
+        public static Queue q = new Queue(null);
 
         public void WaitForAsync(string client, string channel)
         {
