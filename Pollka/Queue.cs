@@ -15,17 +15,17 @@ namespace Pollka
         long messageCounter;
         readonly IObservable<Request> requests;
         readonly TimeSpan messageTimeout;
+        readonly TimeSpan bufferTimeout;
+        readonly TimeSpan requestTimeout;
         readonly Subject<MessageWrapper> incomingMessages;
         readonly ConcurrentDictionary<string, long?> lastMessageSeenByClient;
 
-        public Queue(IObservable<Request> requests) : this(requests, TimeSpan.FromSeconds(30))
-        {
-        }
-
-        public Queue(IObservable<Request> requests, TimeSpan messageTimeout)
+        public Queue(IObservable<Request> requests, TimeSpan? messageTimeout = null, TimeSpan? bufferTimeout = null, TimeSpan? requestTimeout = null)
         {
             this.requests = requests;
-            this.messageTimeout = messageTimeout;
+            this.messageTimeout = messageTimeout ?? TimeSpan.FromSeconds(30);
+            this.bufferTimeout = bufferTimeout ?? TimeSpan.FromMilliseconds(50);
+            this.requestTimeout = requestTimeout ?? TimeSpan.FromSeconds(30);
             lastMessageSeenByClient = new ConcurrentDictionary<string, long?>();
             incomingMessages = new Subject<MessageWrapper>();
             Listen();
@@ -35,15 +35,13 @@ namespace Pollka
         {
             incomingMessages.Join(requests,
                                   _ => Observable.Timer(messageTimeout),
-                                  _ => Observable.Create<string>(o =>
+                                  _ => Observable.Create<long>(o =>
                                   {
-                                      o.OnCompleted();
-                                      return Disposable.Empty;
+                                      return Observable.Timer(bufferTimeout).Subscribe(o);
                                   }),
                                   (message, request) => new {message, request})
                 .Where(@event => @event.request.IsListeningTo(@event.message.Channel))
                 .Distinct(x => string.Format("{0}/{1}", x.request.ClientId, x.message.MessageId))
-                .Take(1)
                 .Subscribe(@event =>
                 {
                     @event.request.Callback(new[]
@@ -95,7 +93,7 @@ namespace Pollka
             //});
         }
 
-        public void Send(Guid messageId, string channel, object message)
+        public void NewMessage(Guid messageId, string channel, object message)
         {
             incomingMessages.OnNext(new MessageWrapper(Interlocked.Increment(ref messageCounter), messageId, channel, message));
         }

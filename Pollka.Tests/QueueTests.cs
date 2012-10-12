@@ -20,12 +20,62 @@ namespace Pollka.Tests
         }
 
         [Fact]
-        public void ReceivesSubscribedMessage()
+        public void ReceivesMessage()
         {
             var queue = new Queue(clients);
             clients.OnNext(new Request("client", new List<string> { "channel" }, receivedMessages.AddRange));
-            queue.Send(Guid.NewGuid(), "channel", new {Something = 1});
+            queue.NewMessage(Guid.NewGuid(), "channel", new {Something = 1});
+            
             Thread.Sleep(200);
+            receivedMessages.Count.ShouldBe(1);
+        }
+
+        [Fact]
+        public void BuffersMultipleMessageIntoOneResponse()
+        {
+            var queue = new Queue(clients);
+            clients.OnNext(new Request("client", new List<string> { "channel" }, receivedMessages.AddRange));
+            queue.NewMessage(Guid.NewGuid(), "channel", new {Something = 1});
+            queue.NewMessage(Guid.NewGuid(), "channel", new {Something = 2});
+            
+            Thread.Sleep(200);
+            receivedMessages.Count.ShouldBe(2);
+        }
+
+        [Fact]
+        public void SameRequestDoesNotReceiveMessagesAfterBufferTimeout()
+        {
+            var queue = new Queue(clients, bufferTimeout: TimeSpan.FromMilliseconds(500));
+            clients.OnNext(new Request("client", new List<string> { "channel" }, receivedMessages.AddRange));
+            queue.NewMessage(Guid.NewGuid(), "channel", new {Something = 1});
+            Thread.Sleep(1000);
+            queue.NewMessage(Guid.NewGuid(), "channel", new {Something = 2});
+            
+            Thread.Sleep(200);
+            receivedMessages.Count.ShouldBe(1);
+        }
+
+        [Fact]
+        public void OtherRequestDoesReceiveMessagesAfterFirstRequestsBufferTimeout()
+        {
+            var queue = new Queue(clients, bufferTimeout: TimeSpan.FromMilliseconds(500));
+            clients.OnNext(new Request("client", new List<string> { "channel" }, receivedMessages.AddRange));
+            queue.NewMessage(Guid.NewGuid(), "channel", new {Something = 1});
+            Thread.Sleep(1000);
+            queue.NewMessage(Guid.NewGuid(), "channel", new {Something = 2});
+            clients.OnNext(new Request("client", new List<string> { "channel" }, receivedMessages.AddRange));
+            
+            Thread.Sleep(200);
+            receivedMessages.Count.ShouldBe(2);
+        }
+
+        [Fact]
+        public void RequestWaitsForAtLeastOneMessage()
+        {
+            var queue = new Queue(clients);
+            clients.OnNext(new Request("client", new List<string> { "channel" }, receivedMessages.AddRange));
+            Thread.Sleep(500);
+            queue.NewMessage(Guid.NewGuid(), "channel", new { Something = 1 });
             receivedMessages.Count.ShouldBe(1);
         }
 
@@ -34,38 +84,41 @@ namespace Pollka.Tests
         {
             var queue = new Queue(clients);
             clients.OnNext(new Request("client", new List<string> { "channel1" }, receivedMessages.AddRange));
-            queue.Send(Guid.NewGuid(), "channel2", new {Something = 1});
+            queue.NewMessage(Guid.NewGuid(), "channel2", new {Something = 1});
             receivedMessages.Count.ShouldBe(0);
         }
 
         [Fact]
-        public void MultipleOldMessagesAreReceivedAtOnce()
+        public void ReceivesLatentMessages()
         {
             var queue = new Queue(clients);
-            queue.Send(Guid.NewGuid(), "channel", new { Something = 1 });
-            queue.Send(Guid.NewGuid(), "channel", new { Something = 2 });
+            queue.NewMessage(Guid.NewGuid(), "channel", new { Something = 1 });
             clients.OnNext(new Request("client", new List<string> { "channel" }, receivedMessages.AddRange));
+            
             Thread.Sleep(200);
-            receivedMessages.Count.ShouldBe(2);
+            receivedMessages.Count.ShouldBe(1);
         }
 
         [Fact]
-        public void ReceivesUnreceivedMessagesEvenAfterTheyAreSent()
+        public void MultipleLatentMessagesAreReceivedAtOnce()
         {
             var queue = new Queue(clients);
-            queue.Send(Guid.NewGuid(), "channel", new { Something = 1 });
+            queue.NewMessage(Guid.NewGuid(), "channel", new { Something = 1 });
+            queue.NewMessage(Guid.NewGuid(), "channel", new { Something = 2 });
             clients.OnNext(new Request("client", new List<string> { "channel" }, receivedMessages.AddRange));
+            
             Thread.Sleep(200);
-            receivedMessages.Count.ShouldBe(1);
+            receivedMessages.Count.ShouldBe(2);
         }
 
         [Fact]
         public void TwoClientsCanReceiveSameMessage()
         {
             var queue = new Queue(clients);
-            queue.Send(Guid.NewGuid(), "channel", new { Something = 1 });
+            queue.NewMessage(Guid.NewGuid(), "channel", new { Something = 1 });
             clients.OnNext(new Request("client1", new List<string> { "channel" }, receivedMessages.AddRange));
             clients.OnNext(new Request("client2", new List<string> { "channel" }, receivedMessages.AddRange));
+            
             Thread.Sleep(200);
             receivedMessages.Count.ShouldBe(2);
         }
@@ -74,10 +127,11 @@ namespace Pollka.Tests
         public void SameClientOnlyReceivesMessageOncePerQueue()
         {
             var queue = new Queue(clients);
-            queue.Send(Guid.NewGuid(), "channel", new { Something = 1 });
+            queue.NewMessage(Guid.NewGuid(), "channel", new { Something = 1 });
             clients.OnNext(new Request("client1", new List<string> { "channel" }, receivedMessages.AddRange));
             Thread.Sleep(50);
             clients.OnNext(new Request("client1", new List<string> { "channel" }, receivedMessages.AddRange));
+            
             Thread.Sleep(200);
             receivedMessages.Count.ShouldBe(1);
         }
@@ -86,7 +140,7 @@ namespace Pollka.Tests
         public void SameClientOnlyReceivesMessageOncePerQueueEvenUnderLoad()
         {
             var queue = new Queue(clients);
-            queue.Send(Guid.NewGuid(), "channel", new { Something = 1 });
+            queue.NewMessage(Guid.NewGuid(), "channel", new { Something = 1 });
             Parallel.For(0, 10,
                          x => clients.OnNext(new Request("client1", new List<string> { "channel" },
                                                 messages =>
@@ -99,17 +153,17 @@ namespace Pollka.Tests
                                                 })));
 
             Thread.Sleep(200);
-
             receivedMessages.Count.ShouldBe(1);
         }
 
         [Fact]
         public void MessageIsLostAfterGivenTime()
         {
-            var queue = new Queue(clients, TimeSpan.FromSeconds(1));
-            queue.Send(Guid.NewGuid(), "channel", new { Something = 1 });
+            var queue = new Queue(clients, messageTimeout: TimeSpan.FromSeconds(1));
+            queue.NewMessage(Guid.NewGuid(), "channel", new { Something = 1 });
             Thread.Sleep(TimeSpan.FromSeconds(2));
             clients.OnNext(new Request("client", new List<string> { "channel" }, receivedMessages.AddRange));
+            
             Thread.Sleep(200);
             receivedMessages.Count.ShouldBe(0);
         }

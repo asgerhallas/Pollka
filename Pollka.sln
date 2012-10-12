@@ -1,16 +1,16 @@
 ﻿
-Microsoft Visual Studio Solution File, Format Version 11.00
-# Visual Studio 2010
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pollka", "Pollka\Pollka.csproj", "{1CC67091-9232-450F-9C83-B47E00EF90E0}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pollka.Tests", "Pollka.Tests\Pollka.Tests.csproj", "{ABF09EC9-0551-4BEB-B6AE-8FBEFF73A428}"
-EndProject
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 2012
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = ".nuget", ".nuget", "{49CE803E-EE56-4C58-B100-DAB09E52B951}"
 	ProjectSection(SolutionItems) = preProject
 		.nuget\NuGet.Config = .nuget\NuGet.Config
 		.nuget\NuGet.exe = .nuget\NuGet.exe
 		.nuget\NuGet.targets = .nuget\NuGet.targets
 	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pollka", "Pollka\Pollka.csproj", "{1CC67091-9232-450F-9C83-B47E00EF90E0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pollka.Tests", "Pollka.Tests\Pollka.Tests.csproj", "{ABF09EC9-0551-4BEB-B6AE-8FBEFF73A428}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Pollka.IntegrationTests", "Pollka.IntegrationTests\Pollka.IntegrationTests.csproj", "{6015666A-5261-4105-A351-89AAB1B3CAC7}"
 EndProject
