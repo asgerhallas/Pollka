@@ -1,12 +1,10 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Reactive.Disposables;
+using System.Reactive;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Threading;
-using Microsoft.FSharp.Collections;
-using System.Linq;
 
 namespace Pollka
 {
@@ -18,7 +16,6 @@ namespace Pollka
         readonly TimeSpan bufferTimeout;
         readonly TimeSpan requestTimeout;
         readonly Subject<MessageWrapper> incomingMessages;
-        readonly ConcurrentDictionary<string, long?> lastMessageSeenByClient;
 
         public Queue(IObservable<Request> requests, TimeSpan? messageTimeout = null, TimeSpan? bufferTimeout = null, TimeSpan? requestTimeout = null)
         {
@@ -26,20 +23,41 @@ namespace Pollka
             this.messageTimeout = messageTimeout ?? TimeSpan.FromSeconds(30);
             this.bufferTimeout = bufferTimeout ?? TimeSpan.FromMilliseconds(50);
             this.requestTimeout = requestTimeout ?? TimeSpan.FromSeconds(30);
-            lastMessageSeenByClient = new ConcurrentDictionary<string, long?>();
             incomingMessages = new Subject<MessageWrapper>();
             Listen();
         }
 
         public void Listen()
         {
-            incomingMessages.Join(requests,
-                                  _ => Observable.Timer(messageTimeout),
-                                  _ => Observable.Create<long>(o =>
-                                  {
-                                      return Observable.Timer(bufferTimeout).Subscribe(o);
-                                  }),
-                                  (message, request) => new {message, request})
+            //incomingMessages.Join(requests,
+            //                      _ => Observable.Timer(messageTimeout),
+            //                      _ => Observable.Timer(bufferTimeout),
+            //                      //_ => Observable.Create<long>(o =>
+            //                      //{
+            //                      //    return Observable.Timer(bufferTimeout).Subscribe(o);
+            //                      //}),
+            //                      (message, request) => new {message, request})
+            //    .Where(@event => @event.request.IsListeningTo(@event.message.Channel))
+            //    .Distinct(x => string.Format("{0}/{1}", x.request.ClientId, x.message.MessageId))
+            //    .Subscribe(@event =>
+            //    {
+            //        @event.request.Callback(new[]
+            //        {
+            //            new
+            //            {
+            //                id = @event.message.MessageId,
+            //                channel = @event.message.Channel,
+            //                type = @event.message.Message.GetType().Name,
+            //                message = @event.message.Message
+            //            }
+            //        });
+            //    });
+
+
+            requests.Join(incomingMessages, 
+                    _ => Observable.Never<Unit>(),
+                    _ => Observable.Timer(messageTimeout).Amb(Observable.Timer(bufferTimeout)),
+                    (request, message) => new { request, message })
                 .Where(@event => @event.request.IsListeningTo(@event.message.Channel))
                 .Distinct(x => string.Format("{0}/{1}", x.request.ClientId, x.message.MessageId))
                 .Subscribe(@event =>
@@ -55,7 +73,6 @@ namespace Pollka
                         }
                     });
                 });
-
 
 
             // could we gate clients
