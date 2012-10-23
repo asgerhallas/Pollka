@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reactive;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
@@ -29,14 +30,30 @@ namespace Pollka
 
         public void Listen()
         {
-            //incomingMessages.Join(requests,
-            //                      _ => Observable.Timer(messageTimeout),
-            //                      _ => Observable.Timer(bufferTimeout),
-            //                      //_ => Observable.Create<long>(o =>
-            //                      //{
-            //                      //    return Observable.Timer(bufferTimeout).Subscribe(o);
-            //                      //}),
-            //                      (message, request) => new {message, request})
+            var events = from request in requests
+                         join message in incomingMessages
+                         on incomingMessages.Delay(bufferTimeout)
+                         equals Observable.Timer(messageTimeout)
+                         into groupedMessages
+                         let listOfGroupedMessages = groupedMessages.ToList()
+                         select groupedMessages.ToList().Select(x => new { message = x, request = request });
+
+            events.Merge().Subscribe(x => 
+            {
+                var t = x.message.Select(y => 
+                    new { 
+                        id = y.MessageId,
+                        channel = y.Channel,
+                        type = y.GetType().Name,
+                        message = y.Message
+                    });
+                x.request.Callback(t);
+            });
+
+            //requests.Join(incomingMessages, 
+            //        _ => Observable.Never<Unit>(),
+            //        _ => Observable.Timer(messageTimeout).Amb(Observable.Timer(bufferTimeout)),
+            //        (request, message) => new { request, message })
             //    .Where(@event => @event.request.IsListeningTo(@event.message.Channel))
             //    .Distinct(x => string.Format("{0}/{1}", x.request.ClientId, x.message.MessageId))
             //    .Subscribe(@event =>
@@ -52,27 +69,6 @@ namespace Pollka
             //            }
             //        });
             //    });
-
-
-            requests.Join(incomingMessages, 
-                    _ => Observable.Never<Unit>(),
-                    _ => Observable.Timer(messageTimeout).Amb(Observable.Timer(bufferTimeout)),
-                    (request, message) => new { request, message })
-                .Where(@event => @event.request.IsListeningTo(@event.message.Channel))
-                .Distinct(x => string.Format("{0}/{1}", x.request.ClientId, x.message.MessageId))
-                .Subscribe(@event =>
-                {
-                    @event.request.Callback(new[]
-                    {
-                        new
-                        {
-                            id = @event.message.MessageId,
-                            channel = @event.message.Channel,
-                            type = @event.message.Message.GetType().Name,
-                            message = @event.message.Message
-                        }
-                    });
-                });
 
 
             // could we gate clients
