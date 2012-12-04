@@ -32,10 +32,10 @@ namespace Pollka
         {
             var events = from request in requests
                          join message in incomingMessages
-                         on incomingMessages.Delay(bufferTimeout)
-                         equals Observable.Timer(messageTimeout)
+                         on Observable.Return(1) // incomingMessages.Delay(bufferTimeout))
+                         equals Observable.Never<Unit>()  //Observable.Timer(messageTimeout)
                          into groupedMessages
-                         let listOfGroupedMessages = groupedMessages.ToList()
+                         //let listOfGroupedMessages = groupedMessages.ToList()
                          select groupedMessages.ToList().Select(x => new { message = x, request = request });
 
             events.Merge().Subscribe(x => 
