@@ -2,10 +2,9 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Reactive;
-using System.Threading;
 using Microsoft.Reactive.Testing;
-using Shouldly;
 using Xunit;
+using Shouldly;
 
 namespace Pollka.Tests
 {
@@ -17,7 +16,8 @@ namespace Pollka.Tests
         readonly TimeSpan requestTimeout;
         readonly List<Recorded<Notification<Request>>> requests;
         readonly TestScheduler scheduler;
-        List<Response> responses;
+        int messageNumber = 1;
+        ITestableObserver<Response> observer;
 
         public QueueTests()
         {
@@ -30,48 +30,49 @@ namespace Pollka.Tests
             requestTimeout = TimeSpan.FromSeconds(30);
         }
 
-        void Request(int milliseconds)
-        {
-            requests.Add(ReactiveTest.OnNext(TimeSpan.FromMilliseconds(milliseconds).Ticks,
-                                             new Request("a", new List<string> {"b"}, x => { })));
-        }
-
-        void Message(int milliseconds)
-        {
-            messages.Add(ReactiveTest.OnNext(TimeSpan.FromMilliseconds(milliseconds).Ticks,
-                                             new MessageWrapper(Guid.NewGuid(), "a", new {Hello = "World"})));
-        }
-
-        ITestableObserver<Response> Go()
-        {
-            var observableRequests = scheduler.CreateHotObservable(requests.ToArray());
-            var observableMessages = scheduler.CreateHotObservable(messages.ToArray());
-
-            var observer = scheduler.Start(
-                () => new Queue(observableRequests,
-                                observableMessages,
-                                messageTimeout,
-                                bufferTimeout,
-                                requestTimeout)
-                          .Listen(scheduler),
-                TimeSpan.FromMilliseconds(300).Ticks);
-
-            responses = observer.Messages.Select(x => x.Value.Value).ToList();
-
-            return observer;
-        }
-
-
         [Fact]
-        public void Yes()
+        public void ReceivesMessage()
         {
             Request(100);
             Message(100);
 
             Go();
 
-            responses.Count.ShouldBe(1);
-            responses[0].Messages.Count.ShouldBe(1);
+            Response(1).ShouldHaveMessage(1);
+        }
+
+        [Fact]
+        public void ReceivesLatentMessages()
+        {
+            Message(100);
+            Request(500);
+
+            Go();
+
+            Response(1).ShouldHaveMessage(1);
+        }
+
+        [Fact]
+        public void MultipleLatentMessagesAreReceivedAtOnce()
+        {
+            Message(100);
+            Message(200);
+            Request(300);
+
+            Go();
+
+            Response(1).ShouldHaveMessage(1, 2);
+        }
+
+        [Fact]
+        public void RequestWaitsForAtLeastOneMessage()
+        {
+            Request(100);
+            Message(1000);
+
+            Go();
+
+            Response(1).ShouldHaveMessage(1);
         }
 
         [Fact]
@@ -83,12 +84,11 @@ namespace Pollka.Tests
 
             Go();
 
-            responses.Count.ShouldBe(1);
-            responses[0].Messages[0].MessageId.ShouldBe("a");.Count.ShouldBe(2);
+            Response(1).ShouldHaveMessage(1, 2);
         }
 
         [Fact]
-        public void SameRequestDoesNotReceiveMessagesAfterBufferTimeout()
+        public void ARequestDoesNotReceiveMessagesAfterBufferTimeout()
         {
             Request(100);
             Message(200);
@@ -96,78 +96,59 @@ namespace Pollka.Tests
 
             Go();
 
-            responses.Count.ShouldBe(1);
-            responses[0].Messages.Count.ShouldBe(1);
+            Response(1).ShouldHaveMessage(1);
         }
 
-        //[Fact]
-        //public void OtherRequestDoesReceiveMessagesAfterFirstRequestsBufferTimeout()
-        //{
-        //    var queue = new Queue(requests, bufferTimeout: TimeSpan.FromMilliseconds(500));
-        //    requests.OnNext(new Request("client", new List<string> { "channel" }, receivedMessages.AddRange));
-        //    queue.NewMessage(Guid.NewGuid(), "channel", new {Something = 1});
-        //    Thread.Sleep(1000);
-        //    queue.NewMessage(Guid.NewGuid(), "channel", new {Something = 2});
-        //    requests.OnNext(new Request("client", new List<string> { "channel" }, receivedMessages.AddRange));
+        [Fact]
+        public void OtherRequestFromSameClientDoesReceiveMessagesAfterFirstRequestsBufferTimeout()
+        {
+            Request(100);
+            Message(200);
+            Message(300);
+            Request(400);
 
-        //    Thread.Sleep(200);
-        //    receivedMessages.Count.ShouldBe(2);
-        //}
+            Go();
 
-        //[Fact]
-        //public void RequestWaitsForAtLeastOneMessage()
-        //{
-        //    var queue = new Queue(requests);
-        //    requests.OnNext(new Request("client", new List<string> { "channel" }, receivedMessages.AddRange));
-        //    Thread.Sleep(500);
-        //    queue.NewMessage(Guid.NewGuid(), "channel", new { Something = 1 });
-        //    Thread.Sleep(200);
-        //    receivedMessages.Count.ShouldBe(1);
-        //}
+            Response(1).ShouldHaveMessage(1);
+            Response(2).ShouldHaveMessage(2);
+        }
 
-        //[Fact]
-        //public void DoesNotReceiveMessageOnOtherChannel()
-        //{
-        //    var queue = new Queue(requests);
-        //    requests.OnNext(new Request("client", new List<string> { "channel1" }, receivedMessages.AddRange));
-        //    queue.NewMessage(Guid.NewGuid(), "channel2", new {Something = 1});
-        //    receivedMessages.Count.ShouldBe(0);
-        //}
+        [Fact]
+        public void MessageIsLostAfterGivenTime()
+        {
+            Message(100);
+            Request((int)messageTimeout.TotalMilliseconds + 200);
 
-        //[Fact]
-        //public void ReceivesLatentMessages()
-        //{
-        //    var queue = new Queue(requests);
-        //    queue.NewMessage(Guid.NewGuid(), "channel", new { Something = 1 });
-        //    requests.OnNext(new Request("client", new List<string> { "channel" }, receivedMessages.AddRange));
+            Go();
 
-        //    Thread.Sleep(200);
-        //    receivedMessages.Count.ShouldBe(1);
-        //}
+            Response(1).ShouldHaveNoMessages();
+        }
 
-        //[Fact]
-        //public void MultipleLatentMessagesAreReceivedAtOnce()
-        //{
-        //    var queue = new Queue(requests);
-        //    queue.NewMessage(Guid.NewGuid(), "channel", new { Something = 1 });
-        //    queue.NewMessage(Guid.NewGuid(), "channel", new { Something = 2 });
-        //    requests.OnNext(new Request("client", new List<string> { "channel" }, receivedMessages.AddRange));
+        [Fact]
+        public void TwoClientsCanReceiveSameMessage()
+        {
+            Request(100, "a");
+            Message(200);
+            Request(300, "b");
 
-        //    Thread.Sleep(200);
-        //    receivedMessages.Count.ShouldBe(2);
-        //}
+            Go();
 
-        //[Fact]
-        //public void TwoClientsCanReceiveSameMessage()
-        //{
-        //    var queue = new Queue(requests);
-        //    queue.NewMessage(Guid.NewGuid(), "channel", new { Something = 1 });
-        //    requests.OnNext(new Request("client1", new List<string> { "channel" }, receivedMessages.AddRange));
-        //    requests.OnNext(new Request("client2", new List<string> { "channel" }, receivedMessages.AddRange));
+            Response(1).ShouldHaveMessage(1);
+            Response(2).ShouldHaveMessage(1);
+        }
 
-        //    Thread.Sleep(200);
-        //    receivedMessages.Count.ShouldBe(2);
-        //}
+        [Fact]
+        public void OneClientOnlyReceivesMessageOnce()
+        {
+            Request(100, "a");
+            Message(200);
+            Request(300, "a");
+
+            Go();
+
+            Response(1).ShouldHaveMessage(1);
+            //Responses().Count.ShouldBe(1);
+        }
 
         //[Fact]
         //public void SameClientOnlyReceivesMessageOncePerQueue()
@@ -202,16 +183,60 @@ namespace Pollka.Tests
         //    receivedMessages.Count.ShouldBe(1);
         //}
 
-        //[Fact]
-        //public void MessageIsLostAfterGivenTime()
-        //{
-        //    var queue = new Queue(requests, messageTimeout: TimeSpan.FromSeconds(1));
-        //    queue.NewMessage(Guid.NewGuid(), "channel", new { Something = 1 });
-        //    Thread.Sleep(TimeSpan.FromSeconds(2));
-        //    requests.OnNext(new Request("client", new List<string> { "channel" }, receivedMessages.AddRange));
 
-        //    Thread.Sleep(200);
+        //[Fact]
+        //public void DoesNotReceiveMessageOnOtherChannel()
+        //{
+        //    var queue = new Queue(requests);
+        //    requests.OnNext(new Request("client", new List<string> { "channel1" }, receivedMessages.AddRange));
+        //    queue.NewMessage(Guid.NewGuid(), "channel2", new {Something = 1});
         //    receivedMessages.Count.ShouldBe(0);
         //}
+
+        void Request(int milliseconds, string clientId = "a")
+        {
+            requests.Add(ReactiveTest.OnNext(TimeSpan.FromMilliseconds(milliseconds).Ticks,
+                                             new Request(clientId, new List<string> {"b"}, x => { })));
+        }
+
+        void Message(int milliseconds)
+        {
+            messages.Add(ReactiveTest.OnNext(TimeSpan.FromMilliseconds(milliseconds).Ticks,
+                                             new MessageWrapper(Guid.NewGuid(), "a", messageNumber++)));
+        }
+
+        void Go(long millisecondsToRun = 0)
+        {
+            var observableRequests = scheduler.CreateHotObservable(requests.ToArray());
+            var observableMessages = scheduler.CreateHotObservable(messages.ToArray());
+
+            var ticksToRun = millisecondsToRun > 0
+                                 ? TimeSpan.FromMilliseconds(millisecondsToRun).Ticks
+                                 : Math.Max(requests.Max(x => x.Time), messages.Max(x => x.Time))
+                                   + bufferTimeout.Ticks // The request needs its timeout before reponding
+                                   + 100000; // And to give some slack
+
+            observer = scheduler.Start(
+                () => new Queue(observableRequests,
+                                observableMessages,
+                                messageTimeout,
+                                bufferTimeout,
+                                requestTimeout)
+                          .Listen(scheduler),
+                ticksToRun);
+        }
+
+        Response Response(int number)
+        {
+            return Responses()[number - 1];
+        }
+
+        List<Response> Responses()
+        {
+            if (observer == null)
+                throw new Exception("You forgot to say GO!");
+
+            return observer.Messages.Select(x => x.Value.Value).ToList();
+        }
     }
 }

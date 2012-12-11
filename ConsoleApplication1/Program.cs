@@ -1,8 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Reactive;
-using System.Reactive.Disposables;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using System.Threading;
@@ -11,47 +8,97 @@ using Xunit;
 
 namespace ConsoleApplication1
 {
-    class Program
+    internal class Program
     {
         static void Main(string[] args)
         {
-            var incomingMessages = Observable.Interval(TimeSpan.FromSeconds(3));
-                //Observable.Create<long>(observer =>
-                //    {
-                //        observer.OnNext(0);
-                //        return Disposable.Empty;
-                //    });
+            var messages = Observable.Interval(TimeSpan.FromSeconds(1));
+            //Observable.Create<long>(observer =>
+            //    {
+            //        observer.OnNext(0);
+            //        return Disposable.Empty;
+            //    });
 
-            var messages2 = incomingMessages.Replay(1).RefCount();
-    
-            var requests = Observable.Interval(TimeSpan.FromSeconds(1));
+            var requests = Observable.Interval(TimeSpan.FromSeconds(3)).Select(x => new {Client = x%2, Request = x});
+            //Observable.Create<string>(observer =>
+            //    {
+            //        observer.OnNext("a");
+            //        observer.OnNext("b");
+            //        observer.OnNext("a");
 
-            var events = requests.GroupJoin(messages2, 
-                                            request =>
-                                                {
-                                                    Console.WriteLine("Begin request " + request);
-                                                    return messages2.Delay(TimeSpan.FromSeconds(0.5)).Do(x => Console.WriteLine("End request " + request));
-                                                },
-                                            message =>
-                                                {
-                                                    Console.WriteLine("Begin message " + message);
-                                                    return Observable.Timer(TimeSpan.FromSeconds(5));
-                                                },
-                                            (request, groupedMessages) =>
-                                            groupedMessages.ToList().Select(x => new {message = x, request = request}));
+            //        return Disposable.Empty;
+            //    });
+
+            var messageTimeout = TimeSpan.FromSeconds(5);
+            var bufferTimeout = TimeSpan.FromMilliseconds(100);
+
+            var clients = requests.GroupBy(x => x.Client);
+
+            var messagesPerClient =
+                (clients.GroupJoin(messages,
+                                   client => client,
+                                   message => Observable.Timer(messageTimeout),
+                                   (client, groupedmessages) => groupedmessages.ToList().Select(y => new { client, groupedmessages = y })));
+
+            messagesPerClient.Merge().Subscribe(x => Console.WriteLine(string.Join(",", x.groupedmessages)));
+
+            //var requestsPerClient = messagesPerClient.Select(x =>
+            //    {
+            //        var r = x.Item1;
+            //        var m = x.Item2.Replay(1).RefCount();
+            //        var events = (from request in r
+            //                      join message in m
+            //                          on m.Delay(bufferTimeout)
+            //                          equals Observable.Timer(messageTimeout)
+            //                          into groupedMessages
+            //                      select groupedMessages
+            //                          .ToList()
+            //                          .Select(y => new
+            //                              {
+            //                                  Request = request,
+            //                                  Messages = y.ToList()
+            //                              }))
+            //            .Merge();
+            //        return events;
+            //    });
+
+            //requestsPerClient.Merge().Subscribe(obj =>
+            //    {
+            //        Console.WriteLine(obj.Request + ":" + string.Join(",", obj.Messages));
+            //    });
+
+            //messagesPerClient.Subscribe(x =>
+            //    {
+            //        Console.WriteLine(x.Item1.Key + ":" + x.Item2);
+            //        x.Item1.Subscribe(y => Console.WriteLine(y));
+            //    });
 
 
-            events.Merge().Subscribe(x =>
-                {
-                    Console.Write(x.request + ": ");
-                    foreach (var m in x.message)
-                    {
-                        Console.Write(m);
-                    }
-                    Console.WriteLine();
-                    
-                    //x.request.Callback(t);
-                });
+            //var everyMessageAndAShadow = messages.Replay(1, messageTimeout).RefCount();
+            //var events = (from request in clients
+            //              join message in everyMessageAndAShadow
+            //                  on everyMessageAndAShadow.Delay(bufferTimeout)
+            //                  equals Observable.Timer(messageTimeout)
+            //                  into groupedMessages
+            //              select groupedMessages
+            //                  .ToList()
+            //                  .Select(x => new
+            //                      {
+            //                          Request = request,
+            //                          Messages = x.ToList()
+            //                      }))
+            //    .Merge();
+
+
+            //events.Subscribe(x =>
+            //    {
+            //        Console.Write(x.Request.Key + ": ");
+            //        foreach (var m in x.Messages)
+            //        {
+            //            Console.Write(m);
+            //        }
+            //        Console.WriteLine();
+            //    });
 
 
             Console.ReadLine();
@@ -60,14 +107,19 @@ namespace ConsoleApplication1
 
     public class TestListener : IDisposable
     {
-        Subject<int> requests = new Subject<int>();
-        Subject<int> messages = new Subject<int>();
-        private string results = "";
-        private IDisposable disposable;
+        readonly IDisposable disposable;
+        readonly Subject<int> messages = new Subject<int>();
+        readonly Subject<int> requests = new Subject<int>();
+        string results = "";
 
         public TestListener()
         {
             disposable = ListenForAWhile();
+        }
+
+        public void Dispose()
+        {
+            disposable.Dispose();
         }
 
         public IDisposable ListenForAWhile()
@@ -76,17 +128,17 @@ namespace ConsoleApplication1
             var bufferTimeout = TimeSpan.FromMilliseconds(100);
             var everyMessageAndAShadow = messages.Replay(1, messageTimeout).RefCount();
             var events = (from request in requests
-                    join message in everyMessageAndAShadow
-                        on everyMessageAndAShadow.Delay(bufferTimeout)
-                        equals Observable.Timer(messageTimeout)
-                        into groupedMessages
-                    select groupedMessages
-                        .ToList()
-                        .Select(x => new
-                        {
-                            Request = request,
-                            Messages = x.ToList()
-                        }))
+                          join message in everyMessageAndAShadow
+                              on everyMessageAndAShadow.Delay(bufferTimeout)
+                              equals Observable.Timer(messageTimeout)
+                              into groupedMessages
+                          select groupedMessages
+                              .ToList()
+                              .Select(x => new
+                                  {
+                                      Request = request,
+                                      Messages = x.ToList()
+                                  }))
                 .Merge();
 
             return events.Subscribe(x =>
@@ -103,7 +155,7 @@ namespace ConsoleApplication1
         {
             requests.OnNext(1);
             messages.OnNext(1);
-            
+
             Thread.Sleep(200);
             results.ShouldBe("1:1");
         }
@@ -186,8 +238,8 @@ namespace ConsoleApplication1
             Thread.Sleep(200);
             results.ShouldContain("1:1");
             results.ShouldContain("2:1");
-        }       
-        
+        }
+
         [Fact]
         public void MessageIsLostAfterAWhile()
         {
@@ -197,11 +249,6 @@ namespace ConsoleApplication1
 
             Thread.Sleep(200);
             results.ShouldBe("");
-        }
-
-        public void Dispose()
-        {
-            disposable.Dispose();
         }
     }
 }
