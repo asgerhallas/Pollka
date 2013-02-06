@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reactive;
 using Microsoft.Reactive.Testing;
-using Xunit;
 using Shouldly;
+using Xunit;
 
 namespace Pollka.Tests
 {
@@ -53,6 +53,18 @@ namespace Pollka.Tests
         }
 
         [Fact]
+        public void ReceivesMessageOnlyWhenRequestIsPresent()
+        {
+            Request(100);
+            Message(200);
+            Message(300);
+
+            Go();
+
+            Responses().Count.ShouldBe(1);
+        }
+
+        [Fact]
         public void MultipleLatentMessagesAreReceivedAtOnce()
         {
             Message(100);
@@ -88,11 +100,25 @@ namespace Pollka.Tests
         }
 
         [Fact]
+        public void BuffersMultipleLatentMessageIntoOneResponse()
+        {
+            Message(100);
+            Message(200);
+            Message(300);
+            Request(400);
+
+            Go();
+
+            Response(1).ShouldHaveMessage(1, 2, 3);
+        }
+
+
+        [Fact]
         public void ARequestDoesNotReceiveMessagesAfterBufferTimeout()
         {
             Request(100);
             Message(200);
-            Message(300);
+            Message(201 + (int) bufferTimeout.TotalMilliseconds);
 
             Go();
 
@@ -104,7 +130,7 @@ namespace Pollka.Tests
         {
             Request(100);
             Message(200);
-            Message(300);
+            Message(201 + (int) bufferTimeout.TotalMilliseconds);
             Request(400);
 
             Go();
@@ -117,9 +143,21 @@ namespace Pollka.Tests
         public void MessageIsLostAfterGivenTime()
         {
             Message(100);
-            Request((int)messageTimeout.TotalMilliseconds + 200);
+            Request(101 + (int) messageTimeout.TotalMilliseconds);
 
-            Go();
+            Go((int) messageTimeout.TotalMilliseconds
+               + (int) requestTimeout.TotalMilliseconds
+               + 102);
+
+            Response(1).ShouldHaveNoMessages();
+        }
+
+        [Fact]
+        public void RequestTimesOutAfterGivenTime()
+        {
+            Request(100);
+
+            Go(101 + (int) requestTimeout.TotalMilliseconds);
 
             Response(1).ShouldHaveNoMessages();
         }
@@ -147,62 +185,33 @@ namespace Pollka.Tests
             Go();
 
             Response(1).ShouldHaveMessage(1);
-            //Responses().Count.ShouldBe(1);
+            Responses().Count.ShouldBe(1);
         }
 
-        //[Fact]
-        //public void SameClientOnlyReceivesMessageOncePerQueue()
-        //{
-        //    var queue = new Queue(requests);
-        //    queue.NewMessage(Guid.NewGuid(), "channel", new { Something = 1 });
-        //    requests.OnNext(new Request("client1", new List<string> { "channel" }, receivedMessages.AddRange));
-        //    Thread.Sleep(50);
-        //    requests.OnNext(new Request("client1", new List<string> { "channel" }, receivedMessages.AddRange));
-
-        //    Thread.Sleep(200);
-        //    receivedMessages.Count.ShouldBe(1);
-        //}
-
-        //[Fact]
-        //public void SameClientOnlyReceivesMessageOncePerQueueEvenUnderLoad()
-        //{
-        //    var queue = new Queue(requests);
-        //    queue.NewMessage(Guid.NewGuid(), "channel", new { Something = 1 });
-        //    Parallel.For(0, 10,
-        //                 x => requests.OnNext(new Request("client1", new List<string> { "channel" },
-        //                                        messages =>
-        //                                        {
-        //                                            receivedMessages.AddRange(messages);
-
-        //                                            // wait a little, so another receive is initiated before
-        //                                            // this message is marked as received
-        //                                            Thread.Sleep(500);
-        //                                        })));
-
-        //    Thread.Sleep(200);
-        //    receivedMessages.Count.ShouldBe(1);
-        //}
-
-
-        //[Fact]
-        //public void DoesNotReceiveMessageOnOtherChannel()
-        //{
-        //    var queue = new Queue(requests);
-        //    requests.OnNext(new Request("client", new List<string> { "channel1" }, receivedMessages.AddRange));
-        //    queue.NewMessage(Guid.NewGuid(), "channel2", new {Something = 1});
-        //    receivedMessages.Count.ShouldBe(0);
-        //}
-
-        void Request(int milliseconds, string clientId = "a")
+        [Fact]
+        public void DoesNotReceiveMessageOnOtherChannel()
         {
-            requests.Add(ReactiveTest.OnNext(TimeSpan.FromMilliseconds(milliseconds).Ticks,
-                                             new Request(clientId, new List<string> {"b"}, x => { })));
+            Request(100, channels: "a");
+            Message(200, channel: "b");
+
+            Go();
+
+            Response(1).ShouldHaveNoMessages();
         }
 
-        void Message(int milliseconds)
+        void Request(int milliseconds, string clientId = "a", params string[] channels)
         {
-            messages.Add(ReactiveTest.OnNext(TimeSpan.FromMilliseconds(milliseconds).Ticks,
-                                             new MessageWrapper(Guid.NewGuid(), "a", messageNumber++)));
+            requests.Add(ReactiveTest.OnNext(
+                TimeSpan.FromMilliseconds(milliseconds).Ticks,
+                new Request(clientId,
+                            channels.Length > 0 ? channels.ToList() : new List<string> {"a"})));
+        }
+
+        void Message(int milliseconds, string channel = "a")
+        {
+            messages.Add(ReactiveTest.OnNext(
+                TimeSpan.FromMilliseconds(milliseconds).Ticks,
+                new MessageWrapper(Guid.NewGuid(), channel, messageNumber++)));
         }
 
         void Go(long millisecondsToRun = 0)
@@ -212,7 +221,7 @@ namespace Pollka.Tests
 
             var ticksToRun = millisecondsToRun > 0
                                  ? TimeSpan.FromMilliseconds(millisecondsToRun).Ticks
-                                 : Math.Max(requests.Max(x => x.Time), messages.Max(x => x.Time))
+                                 : Math.Max(requests.Max(x => (long?) x.Time) ?? 0, messages.Max(x => (long?) x.Time) ?? 0)
                                    + bufferTimeout.Ticks // The request needs its timeout before reponding
                                    + 100000; // And to give some slack
 

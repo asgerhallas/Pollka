@@ -9,11 +9,11 @@ namespace Pollka
 {
     public class Queue
     {
-        private readonly TimeSpan bufferTimeout;
-        private readonly TimeSpan messageTimeout;
-        private readonly IObservable<MessageWrapper> messages;
-        private readonly TimeSpan requestTimeout;
-        private readonly IObservable<Request> requests;
+        readonly TimeSpan bufferTimeout;
+        readonly TimeSpan messageTimeout;
+        readonly IObservable<MessageWrapper> messages;
+        readonly TimeSpan requestTimeout;
+        readonly IObservable<Request> requests;
 
         public Queue(IObservable<Request> requests,
                      IObservable<MessageWrapper> messages,
@@ -30,53 +30,27 @@ namespace Pollka
 
         public IObservable<Response> Listen(IScheduler scheduler)
         {
-            var clients = requests.GroupBy(x => x.ClientId).Do(x => Console.WriteLine("New client " + x.Key));
+            var test = from request in requests
+                       group request by request.ClientId
+                       into clients
+                       join message in messages
+                           on (from _ in Observable.Never<Unit>() select Unit.Default)
+                           equals (from _ in Observable.Timer(messageTimeout, scheduler) select Unit.Default)
+                           into messagesForClient
+                       let messagesPerChannel = messagesForClient.GroupBy(x => x.Channel)
+                       let everyMessageAndHisShadow = messagesForClient.Publish().RefCount()
+                       let buffer = everyMessageAndHisShadow.Buffer(() => 
+                           Observable.Amb(
+                               from _ in everyMessageAndHisShadow.Delay(bufferTimeout, scheduler) select Unit.Default,
+                               from _ in Observable.Timer(requestTimeout, scheduler) select Unit.Default))
+                       select Observable.Zip(buffer, clients, (list, request) => new Response
+                       {
+                           Messages = list.Where(x => request.Channels.Contains(x.Channel)).ToList(),
+                           Request = request
+                       });
 
-            var a = clients.GroupJoin(messages, 
-                        Observable.Never,
-                        x => Observable.Timer(messageTimeout, scheduler),
-                        (requestsPerClient, messagegroup) => new {requestsPerClient, messagegroup });
-
-            var b = a.SelectMany(x =>
-                {
-                    var everyMessageAndHisShadow = x.messagegroup.Replay(1, messageTimeout).RefCount();
-
-                    return everyMessageAndHisShadow.Do(y => Console.WriteLine("Message for client " + x.requestsPerClient.Key))
-                        .Window(
-                        Observable.Amb(
-                            x.requestsPerClient.Select(_ => Unit.Default), everyMessageAndHisShadow.Select(_ => Unit.Default)),
-                                                    _ => everyMessageAndHisShadow.Delay(bufferTimeout, scheduler).Do(y => Console.WriteLine("Closing request")))
-                                            .Select(y => y.ToList().Select(z => new Response
-                                                {
-                                                    Messages = z.ToList()
-                                                })).Merge();
-
-
-                    //var requestsPerClient = x.requestsPerClient.Replay(1).RefCount();
-                    //return (from request in requestsPerClient.Do(y => Console.WriteLine("Request for client " + x.requestsPerClient.Key))
-                    //        join message in everyMessageAndHisShadow.Do(y => Console.WriteLine("Message for client " + x.requestsPerClient.Key))
-                    //            on Observable.Amb(
-                    //                from _ in everyMessageAndHisShadow.Delay(bufferTimeout, scheduler) select Unit.Default,
-                    //                from _ in Observable.Timer(requestTimeout, scheduler) select Unit.Default).Do(y => Console.WriteLine("Closing request"))
-                    //            equals requestsPerClient.Do(y => Console.WriteLine("Closing message"))
-                    //            into groupedMessages
-                    //        select groupedMessages
-                    //            .Do(y => Console.WriteLine("Group"), () => Console.WriteLine("Group complete"))    
-                    //            .ToList()
-                    //            .Select(y => new Response
-                    //            {
-                    //                Request = request,
-                    //                Messages = y.ToList()
-                    //            }))
-                    //    .Merge().Do(y => Console.WriteLine("Merge"));
-                });
-
-            return b;
+            return test.Merge();
         }
-    }
-
-    public class Q
-    {
     }
 
     public class Response
@@ -101,11 +75,10 @@ namespace Pollka
 
     public class Request
     {
-        public Request(string clientId, List<string> channels, Action<IEnumerable<object>> callback)
+        public Request(string clientId, List<string> channels)
         {
             ClientId = clientId;
             Channels = channels;
-            Callback = callback;
         }
 
         public string ClientId { get; private set; }
